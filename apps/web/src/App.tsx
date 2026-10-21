@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiRequestError, buildStreamPath, configuredNetworks } from './api.js';
 import type { Health, LensEvent, TopicCount } from './types.js';
-import { Filters, type FilterState } from './components/Filters.js';
+import { Filters } from './components/Filters.js';
+import type { FilterState } from './route.js';
 import { EventTable } from './components/EventTable.js';
 import { StatusBar } from './components/StatusBar.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
-import { usePersistentState, usePolling, useDebounced, useEventStream, useTheme } from './hooks.js';
+import { usePolling, useDebounced, useEventStream, useUrlState, useTheme } from './hooks.js';
 
 /** Testnet Stellar Asset Contract for native XLM — always emitting events. */
 const EXAMPLE_CONTRACT = 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC'; // XLM SAC
@@ -15,15 +16,36 @@ const CONTRACT_ID_PATTERN = /^C[A-Z2-7]{55}$/;
 
 export function App(): React.JSX.Element {
   const networks = useMemo(configuredNetworks, []);
-  const [networkLabel, setNetworkLabel] = usePersistentState('lens.network', networks[0]!.label);
+
+  // Filter/network/expanded-event state lives in the URL so a link reproduces
+  // the exact view. localStorage is the fallback for a bare visit only.
+  const [urlState, setUrlState] = useUrlState(
+    {
+      filters: { contractId: '', topic: '', successfulOnly: false, live: true },
+      network: networks[0]!.label,
+      expandedEventId: null,
+    },
+    { filters: 'lens.filters', network: 'lens.network' },
+  );
+  const { filters, network: networkLabel, expandedEventId } = urlState;
   const selected = networks.find((n) => n.label === networkLabel) ?? networks[0]!;
 
-  const [filters, setFilters] = usePersistentState<FilterState>('lens.filters', {
-    contractId: '',
-    topic: '',
-    successfulOnly: false,
-    live: true,
-  });
+  const setFilters = useCallback(
+    (next: FilterState): void => setUrlState({ ...urlState, filters: next }),
+    [urlState, setUrlState],
+  );
+
+  const toggleExpanded = useCallback(
+    (eventId: string): void => {
+      // Toggling replaces the current entry (same view), so it does not pollute
+      // back/forward history.
+      setUrlState({
+        ...urlState,
+        expandedEventId: urlState.expandedEventId === eventId ? null : eventId,
+      });
+    },
+    [urlState, setUrlState],
+  );
 
   const [events, setEvents] = useState<LensEvent[]>([]);
   const [total, setTotal] = useState(0);
@@ -187,6 +209,27 @@ export function App(): React.JSX.Element {
 
   const showContract = !filters.contractId;
 
+  // When the URL is `/events/{id}`, fetch that event so it can be shown
+  // expanded even if it is not in the current page (e.g. a deep link to an
+  // older event that is not in the first 50 results).
+  useEffect(() => {
+    if (!expandedEventId) return;
+    const controller = new AbortController();
+    api
+      .event(selected.baseUrl, expandedEventId, controller.signal)
+      .then((event) => {
+        setEvents((current) => {
+          if (current.some((e) => e.id === event.id)) return current;
+          return [event, ...current];
+        });
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        // A missing event does not break the table; the row simply is not there.
+      });
+    return () => controller.abort();
+  }, [selected.baseUrl, expandedEventId]);
+
   const exportJson = useCallback(() => {
     if (events.length === 0) return;
     const blob = new Blob([JSON.stringify(events, null, 2)], { type: 'application/json' });
@@ -245,7 +288,7 @@ export function App(): React.JSX.Element {
         <StatusBar
           networks={networks}
           selected={selected}
-          onSelect={(n) => setNetworkLabel(n.label)}
+          onSelect={(n) => setUrlState({ ...urlState, network: n.label })}
           health={health}
           error={healthError}
           lastUpdated={lastUpdated}
@@ -305,6 +348,8 @@ export function App(): React.JSX.Element {
           events={events}
           showContract={showContract}
           loading={loading}
+          expandedEventId={expandedEventId}
+          onToggleExpand={toggleExpanded}
           onTopicClick={(topic) => setFilters({ ...filters, topic })}
           emptyMessage={
             contractUnknown

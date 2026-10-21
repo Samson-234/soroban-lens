@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import type { LensEvent } from '../types.js';
 import { prettyJson, relativeTime, summarise, summariseTyped, topicPath, truncate } from '../format.js';
 
@@ -6,11 +5,12 @@ interface Props {
   event: LensEvent;
   showContract: boolean;
   onTopicClick: (topic: string) => void;
+  expanded: boolean;
+  onToggle: () => void;
 }
 
 /** One table row, expanding in place to show the full decoded payload. */
-export function EventRow({ event, showContract, onTopicClick }: Props): React.JSX.Element {
-  const [expanded, setExpanded] = useState(false);
+export function EventRow({ event, showContract, onTopicClick, expanded, onToggle }: Props): React.JSX.Element {
   const firstTopic = event.topics[0];
   const topicLabel = firstTopic ? summarise(firstTopic) : '—';
 
@@ -18,7 +18,7 @@ export function EventRow({ event, showContract, onTopicClick }: Props): React.JS
     <>
       <tr
         className={`event-row${expanded ? ' is-expanded' : ''}${event.inSuccessfulContractCall ? '' : ' is-failed'}`}
-        onClick={() => setExpanded((v) => !v)}
+        onClick={onToggle}
         aria-expanded={expanded}
       >
         <td className="col-toggle" aria-hidden="true">{expanded ? '▾' : '▸'}</td>

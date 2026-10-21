@@ -8,10 +8,12 @@ interface Props {
   onTopicClick: (topic: string) => void;
   loading: boolean;
   emptyMessage: string;
+  expandedEventId: string | null;
+  onToggleExpand: (eventId: string) => void;
 }
 
 export function EventTable({
-  events, showContract, onTopicClick, loading, emptyMessage,
+  events, showContract, onTopicClick, loading, emptyMessage, expandedEventId, onToggleExpand,
 }: Props): React.JSX.Element {
   if (events.length === 0) {
     return (
@@ -40,6 +42,8 @@ export function EventTable({
             event={event}
             showContract={showContract}
             onTopicClick={onTopicClick}
+            expanded={expandedEventId === event.id}
+            onToggle={() => onToggleExpand(event.id)}
           />
         ))}
       </tbody>
