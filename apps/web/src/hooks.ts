@@ -144,6 +144,8 @@ export function useUrlState(
           topic: parsed.filters.topic,
           successfulOnly: parsed.filters.successfulOnly,
           live: parsed.filters.live,
+          fromLedger: parsed.filters.fromLedger,
+          toLedger: parsed.filters.toLedger,
         },
         network: parsed.network || initial.network,
         expandedEventId: parsed.expandedEventId,
@@ -156,7 +158,9 @@ export function useUrlState(
       const n = window.localStorage.getItem(storageKeys.network);
       if (f || n) {
         restored = {
-          filters: f ? (JSON.parse(f) as UrlState['filters']) : initial.filters,
+          // Merge over the defaults: filters saved before a field existed
+          // (e.g. fromLedger/toLedger) must not come back undefined.
+          filters: f ? { ...initial.filters, ...(JSON.parse(f) as Partial<UrlState['filters']>) } : initial.filters,
           network: n ? (JSON.parse(n) as string) : initial.network,
           expandedEventId: null,
         };
@@ -198,7 +202,7 @@ export function useUrlState(
     const onPopState = (): void => {
       const parsed = parseUrl(window.location.pathname, window.location.search);
       const next: UrlState = parsed ?? {
-        filters: { contractId: '', topic: '', successfulOnly: false, live: true },
+        filters: { contractId: '', topic: '', successfulOnly: false, live: true, fromLedger: '', toLedger: '' },
         network: '',
         expandedEventId: null,
       };
@@ -257,4 +261,21 @@ export function useTheme(): [Theme, () => void] {
   const theme = saved ?? system;
   const toggle = useCallback(() => setSaved(theme === 'dark' ? 'light' : 'dark'), [theme, setSaved]);
   return [theme, toggle];
+}
+
+export type TimestampFormat = 'relative' | 'absolute';
+
+/**
+ * Whether timestamps are shown as relative ("3h ago") or absolute.
+ *
+ * Persisted so the choice survives a reload, and shared by every row through
+ * the context that consumes it, so the toggle flips the whole table at once.
+ */
+export function useTimestampFormat(): [TimestampFormat, () => void] {
+  const [format, setFormat] = usePersistentState<TimestampFormat>('lens.timestampFormat', 'relative');
+  const toggle = useCallback(
+    () => setFormat(format === 'relative' ? 'absolute' : 'relative'),
+    [format, setFormat],
+  );
+  return [format, toggle];
 }

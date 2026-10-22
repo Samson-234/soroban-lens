@@ -22,6 +22,9 @@ export interface FilterState {
   topic: string;
   successfulOnly: boolean;
   live: boolean;
+  /** Inclusive ledger bounds as typed in the filter bar; '' when unset. */
+  fromLedger: string;
+  toLedger: string;
 }
 
 /** The complete view state that can be encoded in the URL. */
@@ -57,6 +60,8 @@ export function parseUrl(pathname: string, search: string): UrlState | null {
       successfulOnly: params.get('successfulOnly') === 'true',
       // live defaults to true; only `live=false` turns it off.
       live: params.get('live') !== 'false',
+      fromLedger: params.get('fromLedger') ?? '',
+      toLedger: params.get('toLedger') ?? '',
     },
     network: params.get('network') ?? '',
     expandedEventId,
@@ -78,6 +83,8 @@ export function stringifyUrl(state: UrlState): string {
   if (f.successfulOnly) params.set('successfulOnly', 'true');
   // live defaults to true, so only write it when it is off.
   if (!f.live) params.set('live', 'false');
+  if (f.fromLedger) params.set('fromLedger', f.fromLedger);
+  if (f.toLedger) params.set('toLedger', f.toLedger);
   if (state.network) params.set('network', state.network);
 
   const query = params.toString();
@@ -100,6 +107,8 @@ export function sameFilterView(a: UrlState, b: UrlState): boolean {
     a.filters.topic === b.filters.topic &&
     a.filters.successfulOnly === b.filters.successfulOnly &&
     a.filters.live === b.filters.live &&
+    a.filters.fromLedger === b.filters.fromLedger &&
+    a.filters.toLedger === b.filters.toLedger &&
     a.network === b.network
   );
 }

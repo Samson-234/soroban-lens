@@ -10,10 +10,12 @@ interface Props {
   emptyMessage: string;
   expandedEventId: string | null;
   onToggleExpand: (eventId: string) => void;
+  /** Whether the Ledger column shows absolute time instead of relative. */
+  absolute: boolean;
 }
 
 export function EventTable({
-  events, showContract, onTopicClick, loading, emptyMessage, expandedEventId, onToggleExpand,
+  events, showContract, onTopicClick, loading, emptyMessage, expandedEventId, onToggleExpand, absolute,
 }: Props): React.JSX.Element {
   if (events.length === 0) {
     return (
@@ -44,6 +46,7 @@ export function EventTable({
             onTopicClick={onTopicClick}
             expanded={expandedEventId === event.id}
             onToggle={() => onToggleExpand(event.id)}
+            absolute={absolute}
           />
         ))}
       </tbody>
