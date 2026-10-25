@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiRequestError, buildStreamPath, configuredNetworks } from './api.js';
 import type { ContractActivity, ContractSummary, Health, LensEvent, TopicCount } from './types.js';
-import { Filters, type FilterState } from './components/Filters.js';
+import { Filters } from './components/Filters.js';
+import type { FilterState } from './route.js';
 import { ActivityChart } from './components/ActivityChart.js';
 import { EventTable } from './components/EventTable.js';
 import { EventCompare } from './components/EventCompare.js';
 import { StatusBar } from './components/StatusBar.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
-import { usePersistentState, usePolling, useDebounced, useEventStream, useTheme } from './hooks.js';
+import { usePolling, useDebounced, useEventStream, usePersistentState, useUrlState, useTheme } from './hooks.js';
 import { LocaleProvider, useLocale, LOCALE_CODES, LOCALE_LABELS } from './i18n/index.js';
 
 /** Testnet Stellar Asset Contract for native XLM — always emitting events. */
@@ -41,61 +42,35 @@ function readCompareParam(): string[] {
 function AppInner(): React.JSX.Element {
   const { t, locale, setLocale } = useLocale();
   const networks = useMemo(configuredNetworks, []);
-  const [networkLabel, setNetworkLabel] = usePersistentState('lens.network', networks[0]!.label);
+
+  // Filter/network/expanded-event state lives in the URL so a link reproduces
+  // the exact view. localStorage is the fallback for a bare visit only.
+  const [urlState, setUrlState] = useUrlState(
+    {
+      filters: { contractId: '', topic: '', successfulOnly: false, live: true, fromLedger: '', toLedger: '' },
+      network: networks[0]!.label,
+      expandedEventId: null,
+    },
+    { filters: 'lens.filters', network: 'lens.network' },
+  );
+  const { filters, network: networkLabel, expandedEventId } = urlState;
   const selected = networks.find((n) => n.label === networkLabel) ?? networks[0]!;
 
-  // ---------- URL-based shareable state (#63, #68) ----------
-  // On first load, prefer URL search params over localStorage so that a shared
-  // link always wins. After that, keep URL and localStorage in sync.
-  const [filters, setFiltersRaw] = usePersistentState<FilterState>('lens.filters', (() => {
-    const sp = new URLSearchParams(window.location.search);
-    return {
-      contractId: sp.get('contractId') ?? '',
-      topic: sp.get('topic') ?? '',
-      successfulOnly: sp.get('successfulOnly') === 'true',
-      live: sp.has('live') ? sp.get('live') === 'true' : true,
-      fromLedger: sp.get('fromLedger') ?? '',
-      toLedger: sp.get('toLedger') ?? '',
-    };
-  })());
-
-  /** Update filter state and push the new params into the URL bar. */
   const setFilters = useCallback(
-    (next: FilterState) => {
-      setFiltersRaw(next);
-      const sp = new URLSearchParams();
-      if (next.contractId) sp.set('contractId', next.contractId);
-      if (next.topic) sp.set('topic', next.topic);
-      if (next.successfulOnly) sp.set('successfulOnly', 'true');
-      if (!next.live) sp.set('live', 'false');
-      if (next.fromLedger) sp.set('fromLedger', next.fromLedger);
-      if (next.toLedger) sp.set('toLedger', next.toLedger);
-      const qs = sp.toString();
-      const newUrl = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
-      window.history.pushState(null, '', newUrl);
-    },
-    [setFiltersRaw],
+    (next: FilterState): void => setUrlState({ ...urlState, filters: next }),
+    [urlState, setUrlState],
   );
 
-  // Restore filter state when the user navigates with back/forward.
-  useEffect(() => {
-    const onPopState = (): void => {
-      const sp = new URLSearchParams(window.location.search);
-      setFiltersRaw({
-        contractId: sp.get('contractId') ?? '',
-        topic: sp.get('topic') ?? '',
-        successfulOnly: sp.get('successfulOnly') === 'true',
-        live: sp.has('live') ? sp.get('live') === 'true' : true,
-        fromLedger: sp.get('fromLedger') ?? '',
-        toLedger: sp.get('toLedger') ?? '',
-      });
-    };
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, [setFiltersRaw]);
 
   const [events, setEvents] = useState<LensEvent[]>([]);
-  const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(() => new Set());
+  const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(
+    () => new Set(expandedEventId ? [expandedEventId] : []),
+  );
+  // A deep link (or back/forward) to /events/{id} opens that row.
+  useEffect(() => {
+    if (!expandedEventId) return;
+    setExpandedEventIds((current) => (current.has(expandedEventId) ? current : new Set(current).add(expandedEventId)));
+  }, [expandedEventId]);
   const [total, setTotal] = useState(0);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
@@ -285,8 +260,10 @@ function AppInner(): React.JSX.Element {
     const url = new URL(window.location.href);
     if (selectedIds.length === 2) url.searchParams.set('compare', selectedIds.join(','));
     else url.searchParams.delete('compare');
-    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
-  }, [selectedIds]);
+    // Keep the router's history state, and re-apply after any URL change,
+    // since filter and expand updates rewrite the query string.
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [selectedIds, urlState]);
 
   // Both events come from the loaded page when they can; a deep link fetches
   // them by id, since the two being compared are often far outside page one.
@@ -374,16 +351,15 @@ function AppInner(): React.JSX.Element {
   }, [selected.baseUrl, query, nextCursor, loadingMore]);
 
   const toggleEventExpanded = useCallback((eventId: string) => {
-    setExpandedEventIds((current) => {
-      const next = new Set(current);
-      if (next.has(eventId)) {
-        next.delete(eventId);
-      } else {
-        next.add(eventId);
-      }
-      return next;
-    });
-  }, []);
+    const opening = !expandedEventIds.has(eventId);
+    const next = new Set(expandedEventIds);
+    if (opening) next.add(eventId);
+    else next.delete(eventId);
+    setExpandedEventIds(next);
+    // The URL names the most recently opened event, so a copied link opens it.
+    if (opening) setUrlState({ ...urlState, expandedEventId: eventId });
+    else if (urlState.expandedEventId === eventId) setUrlState({ ...urlState, expandedEventId: null });
+  }, [expandedEventIds, urlState, setUrlState]);
 
   // When the query or network changes, fetch fresh data but keep the old rows
   // on screen until the new ones arrive.
@@ -488,6 +464,27 @@ function AppInner(): React.JSX.Element {
     });
   };
 
+  // When the URL is `/events/{id}`, fetch that event so it can be shown
+  // expanded even if it is not in the current page (e.g. a deep link to an
+  // older event that is not in the first 50 results).
+  useEffect(() => {
+    if (!expandedEventId) return;
+    const controller = new AbortController();
+    api
+      .event(selected.baseUrl, expandedEventId, controller.signal)
+      .then((event) => {
+        setEvents((current) => {
+          if (current.some((e) => e.id === event.id)) return current;
+          return [event, ...current];
+        });
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        // A missing event does not break the table; the row simply is not there.
+      });
+    return () => controller.abort();
+  }, [selected.baseUrl, expandedEventId]);
+
   const exportJson = useCallback(() => {
     if (events.length === 0) return;
     const blob = new Blob([JSON.stringify(events, null, 2)], { type: 'application/json' });
@@ -589,7 +586,7 @@ function AppInner(): React.JSX.Element {
         <StatusBar
           networks={networks}
           selected={selected}
-          onSelect={(n) => setNetworkLabel(n.label)}
+          onSelect={(n) => setUrlState({ ...urlState, network: n.label })}
           health={health}
           error={healthError}
           lastUpdated={lastUpdated}
