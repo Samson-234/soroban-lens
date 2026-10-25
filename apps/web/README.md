@@ -21,6 +21,14 @@ always emitting.
 
 ## What it does
 
+- **Shareable URLs** — contract, topic, network, and expanded-event state all
+  live in the query string. Copy the address bar, paste it in a fresh browser,
+  and the exact same view appears. The `/events/{eventId}` path is a clean deep
+  link that opens that event expanded, with the current filters preserved.
+- **Back/forward navigation** — filter changes push a new history entry; expanding
+  or collapsing an event replaces the current entry. Back moves through filter
+  history, not through every row you ever clicked. A bare visit (no query params)
+  falls back to whatever was last saved in `localStorage`.
 - **Contract filter** — paste a contract id; the id is validated against the
   StrKey shape before a request goes out, so a typo is a message rather than a
   400 from the server. The indexed-contract picker lists event counts and last
@@ -32,7 +40,8 @@ always emitting.
 - **Expandable rows** — click a row for decoded topics and value, plus the raw
   XDR the decoding came from, under a disclosure. Focus a row and use the
   arrow keys to move, Enter/Space to expand, or Escape to collapse; `/` focuses
-  the contract field.
+  the contract field. The most recently expanded event is part of the URL,
+  so a colleague can open the same view.
 - **Compare two events** — tick the checkbox on any two rows to open a
   side-by-side diff: differing topics and metadata highlighted, the decoded
   value diffed structurally through maps and vecs (a key present on one side
@@ -50,7 +59,33 @@ always emitting.
   default). A network with no explorer configured shows plain text, not a link.
 - **Load more** — keyset pagination via the API's `nextCursor`.
 
-Filters and the selected network persist in `localStorage`.
+Theme stays in `localStorage` (not the URL); everything else is in the address
+bar.
+
+## URL structure
+
+The address bar is the source of truth for the current view. Two shapes:
+
+```
+/?contract=C…&topic=transfer&successfulOnly=true&live=false&network=testnet
+/events/0020166232959352832-0000000000?contract=C…&network=testnet
+```
+
+| Param | Default | Notes |
+|---|---|---|
+| `contract` | *(empty)* | StrKey contract id; empty means all indexed contracts |
+| `topic` | *(empty)* | Topic prefix to filter on |
+| `successfulOnly` | `false` | Only sent when `true` |
+| `live` | `true` | Only sent when `false` |
+| `network` | first configured network | The API instance label |
+
+Only non-default values are written, so a shared URL stays short. The
+`/events/{eventId}` path opens that event expanded; the query params carry the
+filters so the surrounding table shows the right context.
+
+A bare visit (no query params and no `/events/{id}` path) falls back to the
+last-used filters and network from `localStorage`, so returning to the explorer
+without a shared link picks up where you left off.
 
 ## Configuration
 
